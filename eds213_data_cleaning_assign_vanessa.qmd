@@ -1,0 +1,170 @@
+---
+title: "Week2 - Data Cleaning Assignment"
+author: "Vanessa Salgdo"
+data: Sys.Date()
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(here)
+library(naniar)
+```
+
+### Directions:
+
+We cleaned the Snow_cover column during class. Inspiring yourself from the steps we followed, do the following in a quarto document:
+
+- [] Clean the Water_cover column to transform it into the correct data type and respect expectations for a percentage
+
+- [] Clean the Land_cover column to transform it into the correct data type and respect expectations for a percentage
+
+- [] Use the relationship between the three cover columns (Snow, Water, Land) to infer missing values where possible and recompute the Total_cover column
+
+- [] Add comments to your quarto document about your decisions and assumptions, this will be part of the grading.
+
+------------------------------------------------------------------------
+
+Read in the data from the data cleaning done in lecture :
+```{r}
+#------------------------------------------------------------------------
+#                           Read in Data
+#------------------------------------------------------------------------
+
+datadir_processed <- "data/processed/"
+
+snow_data <- read_csv(here("data", "processed", "snow_cover.csv")) %>% 
+  clean_names()
+
+```
+
+
+
+I included the exploratory data analysis code chunk but did not ouput the results. I found that the both the `water_cover` and `land_cover` had similar issues, such as .", "-", "n/a", "unk" variables.  I went ahead and tackled the data cleaning as a whole then tackled the specific columns
+
+```{r, eval=FALSE}
+# check of water cover is correct data type
+class(snow_data$water_cover)
+
+# check if it has similar characters for NAs as snow cover
+snow_data %>% 
+  filter(water_cover %in% c(".", "-", "n/a", "unk")) %>% 
+  View()
+
+# view values for water cover
+unique(snow_data$water_cover)
+```
+
+
+I went ahead and tackled the data cleaning as a whole then tackled the specific columns.
+
+```{r}
+#------------------------------------------------------------------------
+#               Preprocess the dataset as a whole
+#------------------------------------------------------------------------
+
+# defina a list of NA or NA variants strings that I will replace with NA
+na_strings <- c("NA", "N A", "N / A", "N/A", "N/ A", "unk", "n/a", ".", "-")
+na_strings <- c("NA", "N A", "N / A", "N/A", "N/ A", "unk", "n/a")
+
+# preprocessing the dataset as a whole
+snow_data <- snow_data %>%
+  replace_with_na_all(condition = ~.x %in% na_strings) %>% # replace NA strings with NA
+  mutate(across(ends_with("_cover"), ~ifelse(.x == "-", NA, .x))) %>% 
+  mutate(across(ends_with("_cover"), ~ifelse(.x == ".", NA, .x))) %>% 
+  mutate(across(ends_with("_cover"), as.numeric)) # change char types to numeric
+
+```
+
+Clean the `water_cover` column.
+
+Now that the water cover is numeric, I used the maximum and minimum values to see if the range of values was between 0 and 100%. There was only a single value over 100, so I decided to change it to an NA value.
+
+```{r}
+#------------------------------------------------------------------------
+#               Clean the water_cover column
+#------------------------------------------------------------------------
+snow_data <- snow_data %>% 
+  
+  # change values over 100% to NA
+  mutate(water_cover = ifelse(water_cover > 100, NA, water_cover))
+```
+
+Clean the `land_cover` column
+```{r}
+#------------------------------------------------------------------------
+#               Clean the land_cover column
+#------------------------------------------------------------------------
+# check percentages
+# snow_data %>% filter(land_cover > 100 | land_cover < 0) %>% 
+# head(10)
+
+# change -298 to NA
+snow_data <- snow_data %>% 
+  mutate(land_cover = ifelse(land_cover == -298, NA, land_cover))
+
+# manually update row for -100 land cover
+snow_data$snow_cover[223] <- 0
+snow_data$land_cover[223] <- 100
+```
+
+Recompute the `total_cover` column
+
+```{r}
+#------------------------------------------------------------------------
+#               recompute the Total_cover column
+#------------------------------------------------------------------------
+snow_data <- snow_data %>% 
+  
+  # remove strange string by removing anything that contains "row"
+  mutate(total_cover = ifelse(str_detect(total_cover, "row"), NA, total_cover)) %>% 
+  
+  # remove columns where all values are NA
+  filter(!is.na(snow_cover) | !is.na(water_cover) | !is.na(land_cover)) %>% 
+  
+  # convert column to numeric
+  mutate(total_cover = as.numeric(total_cover)) %>% 
+  
+  # remove column above 100
+  filter(total_cover <= 100)
+```
+
+
+
+```{r}
+#------------------------------------------------------------------------
+#                     inferring missing values
+#------------------------------------------------------------------------
+
+snow_data <- snow_data %>% 
+
+  # estimate snow cover values
+  mutate(snow_cover_est = ifelse(is.na(snow_cover), 
+                                  total_cover - (water_cover + land_cover),
+                                  snow_cover),
+         
+         # estimate water cover values
+         water_cover_est = ifelse(is.na(water_cover),
+                                   total_cover - (snow_cover + land_cover),
+                                   water_cover),
+         
+         # estimate land cover values
+         land_cover_est = ifelse(is.na(land_cover),
+                                  total_cover - (snow_cover + land_cover),
+                                  land_cover)) %>% 
+  
+  # calculate new total using estimated values
+  mutate(new_total = snow_cover_est + water_cover_est + land_cover_est)
+  
+```
+
+Writing csv
+```{r}
+#------------------------------------------------------------------------
+#                            write csv 
+#------------------------------------------------------------------------
+write_csv(snow_data, here("data", "processed", "all_cover_fixed_vanessa.csv"))
+```
+
